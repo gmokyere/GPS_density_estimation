@@ -1,0 +1,160 @@
+---
+title: "Multi-Model Density Estimation using Gaussian Mixture Model"
+author: "Emmanuel Okyere Darko, Duncan K. Ofosu"
+date: "5/4/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+## Introduction
+
+In building models for vehicle operations on the road, it is important to determine the distribution of speed for vehicles on the road. Given any dataset, a potential distribution can be fitted to it. The goal in this writing is to show that parametric density estimation may not be appropriate for speed/trajectory data. Some studies have shown that analyzing speed data in response to different traffic conditions has considerable impact on speed distribution and with increasing traffic density. Thus, with increasing traffic density, the known theoretical distribution may not fit to the speed distribution as a result a parametric density estimation may not always work for a speed data, therefore a semi-parametric density estimation will also be discussed.
+
+
+
+```{r library, message=FALSE, warning=FALSE, echo=FALSE}
+
+## Libraries 
+
+setwd("~/Desktop/Vehicle detection")
+
+library(tidyverse)
+library(MASS)
+library(readr)
+library(mclust, quietly = TRUE)
+```
+
+## Initial Study of Data
+For this task, the data used is from the vehicle speed of taxi drivers in Beijing over a week’s period. The speed data as a random variable is continuous data because it takes on values within a specified range. Thus, the probability of observing an exact speed is zero (or approximately zero). For any speed data, depending on the vehicle involved, their corresponding speed over a period of time would vary. It could be argued that the speed of a particular vehicle can be defined over a finite interval, but it is important to note that, there is a possibility of an individual’s vehicle speed going beyond the finite intervals albeit with a very small probability. Thus, the choice of potential distributions to fit the speed data to, an infinite data distribution is chosen. 
+
+```{r data, echo=F, message=FALSE, warning=FALSE}
+
+taxi_39 <- read_csv("Data/taxi_39.csv")
+
+spd <- log(taxi_39$spd)
+
+broom::tidy(c(summary(taxi_39$spd), sd = sd(taxi_39$spd)))
+```
+
+
+As seen above from the summary statistics, the minimum speed is 0.001m/s and maximum speed is 2861m/s with a standard deviation of 67m/s, this is a fairly large range of over 2000m/s for a random variable. 
+
+```{r, echo=FALSE}
+hist(taxi_39$spd, main = "Histogram of Speed", 
+     col = "lightblue", xlab = "Speed \nfigure1")
+
+```
+
+
+Looking at the histogram, we can observe extreme values with low frequencies and it is hard to guess the distribution. To estimate the density, only data points below the `99th percentile` were considered
+
+
+### Fitting Data
+
+```{r, echo=FALSE}
+
+## Subset 99th percentile
+ spd_wo_outliers <- taxi_39$spd[taxi_39$spd <= quantile(taxi_39$spd, 0.99)]
+ 
+hist(spd_wo_outliers, main = "Histogram of Speed (NO outliers)", 
+     col = "lightblue", xlab = "Speed\n Figure 2")
+
+```
+
+<img src = "pics/kstest.png">
+
+After removing the data points above the `99th percentile`, a parametric density estimation is fitted to the speed random variable using exponential and log-normal distribution. The p-values < `0.05` indicate that the data does not follow both distributions. Also the low p-values indicate that a parametric distribution may not be a good density estimation.
+
+
+### Log Domain
+
+
+Given that we are interested in the extreme cases of the speed of a driver, taking out outliers may not be
+the best approach. As traffic conditions has a significant impact on the distribution, the log domain is used in this case to respond to skewness.	Looking at the histogram in fig. 1, the histogram is not sensitive enough to show large values with low frequencies. Switching to log domain can address this problem
+
+
+```{r, echo=FALSE}
+## Log summary
+
+c(summary(spd), sd = sd(spd))
+
+```
+
+
+
+```{r, echo=FALSE}
+
+## Log Speed
+
+hist(spd, main = "Histogram of Speed (Log)", col = "lightblue", xlab = "Log(speed) \nFig.3 ")
+
+```
+
+As shown above, the log-domain helps stabilize variation with a standard deviation of only 3m/s. Also, switching to the log-domain responds to high values that have low frequencies. Observing the histogram in fig. 3 shows that the distribution of the data is not uni-modal, therefore a Gaussian Mixture Model will be used to estimate the density.
+
+
+## Gaussian Mixture Model (GMM)
+
+GMM like any other clustering algorithm needs the be initialized with the number of clusters/components
+in other to estimate the parameter. To figure out the number of components need, fig. 3 shows that at least 2 clusters are involved in the random variable. The `densityMclust` function in `R` loops to a list of of components and returns the best component based on the `BIC`. 
+
+#### Finding Optimal Components
+
+```{r}
+fit_dens <- densityMclust(spd, model = "V")
+summary(fit_dens)
+
+plot(fit_dens, what = "BIC")
+
+```
+
+Different models may return different number of optimal number of components. The best number of clusters returned by the function above is `4 components with unequal variance assumption`. 
+
+#### Diagnostics
+
+```{r, echo = FALSE}
+par(mfrow = c(1,2))
+plot(fit_dens, what = "diagnostic")
+
+```
+
+The qq-plot shows that most of the points lie on the qq-line indicating the Gaussian Mixture with 4-components is a good fit to the data. The ecdf also shows that the probability a data point lies below `e^5` is approximately 1. 
+
+#### Finding Paramters
+Now the the optimal number of components is found, it can be used to estimate the parameters for probability density, thus `mean, standard deviations, and weights/proportions` of each cluster. 
+That is a Gaussian mixture with `4-clusters` will be fitted to the data. 
+
+```{r}
+## G = 2
+fit_4 <- mclust::Mclust(spd, G= 4, model = "V")
+broom::tidy(fit_4)
+```
+Above are the proportion of elements in each component and it's corresponding mean and standard deviation.
+Given we have 4 components, we expect to have 12 parameters for the distribution
+
+
+```{r, echo=FALSE}
+plot(fit_4, what="density", main="", xlab=" Log speed ")
+points(spd, rep(0.0001, len = length(spd)), col = fit_4$classification)
+```
+
+From the density plots, we see the number of data points in each components with its assigned color label
+
+```{r, echo=FALSE}
+
+plot(fit_4, what = "uncertainty", main = "G = 2")
+```
+
+In this plot, the black bars are the data-points, it can be inferred that most data points have high probability of been in their assigned clusters.
+
+
+## Summary
+- Parametric density estimation was not the best approach for the speed random variable
+- Traffic conditions have a significant effect on the distribution on the speed of a vehicle, in this cases a multi-modal distribution emerged with `4-components`     
+- Gaussian Mixture Model does not assign each data point to only one cluster but rather the probability of been in a particular cluster
+
+```{r}
+sessionInfo()
+```
